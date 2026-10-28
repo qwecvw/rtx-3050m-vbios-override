@@ -15,10 +15,12 @@ import mmap, os, struct, sys
 fd = os.open(sys.argv[1], os.O_RDONLY | os.O_SYNC)
 mm = mmap.mmap(fd, 0x1000000, mmap.MAP_SHARED, mmap.PROT_READ)
 rd = lambda off: struct.unpack('<I', mm[off:off + 4])[0]
-ss0, ss1 = rd(0x0082381c), rd(0x00823820)
-print(f'SS0=0x{ss0:08x} SS1=0x{ss1:08x} ->',
-      'unlocked' if (ss0, ss1) == (0x88888888, 0x8)
-      else 'GPU asleep (all ones)' if ss0 == 0xffffffff else 'NOT unlocked')
+plm, ss0, ss1 = rd(0x00823804), rd(0x0082381c), rd(0x00823820)
+print(f'PLM=0x{plm:08x} SS0=0x{ss0:08x} SS1=0x{ss1:08x} ->',
+      'GPU asleep (all ones)' if ss0 == 0xffffffff
+      else 'unlocked' if (plm, ss0, ss1) == (0xffffffff, 0x88888888, 0x8)
+      else 'NOT unlocked (re-locked, PLM 0xffffff8f expected)' if plm == 0xffffff8f
+      else 'NOT unlocked')
 mm.close(); os.close(fd)
 EOF
 

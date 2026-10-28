@@ -75,9 +75,12 @@ at the time.
 
 A compatibility report on an RTX 3050 Ti Laptop (`10de:25a0`, GA107) in
 [Zagitta/gpu-unlock#246](https://github.com/Zagitta/gpu-unlock/issues/246) gives a likely cause:
-with the default fine-grained runtime D3, the driver power-gates the dGPU and the firmware
-re-locks the selectors on driver re-init. Their fix is disabling runtime D3 with
-`nvidia.NVreg_DynamicPowerManagement=0x00` on the kernel command line. On this laptop the
+with the default fine-grained runtime D3, the driver power-gates the dGPU and GSP-RM
+re-initialises on idle wake, re-locking FEAT_OVR_PLM (`0xffffff8f`) and rewriting SS0/SS1.
+The module still logs `unlocked`. Their fix is disabling runtime D3 with
+`nvidia.NVreg_DynamicPowerManagement=0x00` **on the kernel command line**; a `modprobe.d`
+option was not honoured for the initramfs-loaded nvidia module. They also report that a full
+cold power cycle did not preserve the unlock. On this laptop the
 re-lock is intermittent (several D3 cycles kept the unlock), and that workaround has not
 been tested here yet. It keeps the dGPU powered at idle, which costs battery.
 
