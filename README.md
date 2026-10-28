@@ -6,6 +6,10 @@ Runtime VBIOS power limit override using two tools by **panchovix**:
 Snapshots of both are kept in [`third_party/`](third_party/README.md) with their licenses
 and the exact upstream commits.
 
+Used together with `gpu-unlock` for GA107 (FP16/BF16 tensor unlock), from
+[qwecvw/gpu-unlock-3050m-4gb](https://github.com/qwecvw/gpu-unlock-3050m-4gb).
+All benchmarks below were taken with it loaded; the override without it was not tested.
+
 **No EEPROM flash.** The modified VBIOS is loaded into RAM at boot by patched
 NVIDIA open kernel modules. The card's flash chip is never written. Selecting the
 normal GRUB entry boots with the stock VBIOS.
@@ -49,7 +53,7 @@ All on driver 615.71.09 with `gpu-unlock` loaded.
 
 In boot B the GPU drew 51–52 W at ~1440–1470 MHz during these runs, above the stock 50 W ceiling.
 
-Earlier reference (driver 595, from the main README): locked FP16 ~7.4, FP32 3.05.
+Earlier reference (driver 595, from the gpu-unlock repo README): locked FP16 ~7.4, FP32 3.05.
 
 What these numbers do and do not show:
 
