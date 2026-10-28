@@ -67,11 +67,13 @@ A full cold power cycle does **not** help; D3 is what decides whether the unlock
 
 | Configuration | FP16 | BF16 | FP32 |
 |---|---|---|---|
-| Locked (stock, driver 595) | 14.48 | 14.33 | 3.75 |
-| Unlock, 50 W boot | 22.9–23.4 | 23.4–24.1 | 3.74–3.78 |
-| Unlock + 75 W ceiling / 50 W default, D3 off | 23.8–25.0 | 25.5–26.4 | 3.79–3.88 |
+| Stock VBIOS (35 W default / 50 W ceiling), **locked**, driver 595 | 14.48 | 14.33 | 3.75 |
+| Stock VBIOS (35 W / 50 W), unlock, driver 615 | 22.9–23.4 | 23.4–24.1 | 3.74–3.78 |
+| Override 50 W default / 75 W ceiling, unlock, D3 off | 23.8–25.0 | 25.5–26.4 | 3.79–3.88 |
 
-Short runs do not heat the card; see the sustained results for real workloads.
+Stock locked run, power avg/peak during each GEMM: FP16 27.5 / 45.3 W, BF16 28.7 / 42.2 W,
+FP32 31.7 / 49.2 W (peak clock 1822–1920 MHz). Short runs do not heat the card; see the
+sustained results for real workloads. No sustained run on the stock VBIOS yet.
 
 ### Sustained load (`stress_max.sh`, 5 min per stage)
 
