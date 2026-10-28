@@ -53,24 +53,33 @@ All on driver 615.71.09 with `gpu-unlock` loaded.
 
 In boot B the GPU drew 51–52 W at ~1440–1470 MHz during these runs, above the stock 50 W ceiling.
 
-Earlier reference (driver 595, from the gpu-unlock repo README): locked FP16 ~7.4, FP32 3.05.
+Locked reference (stock, no unlock, driver 595, same script): FP16 14.48, BF16 14.33, FP32 3.75.
 
 What these numbers do and do not show:
 
 - **The 75 W limit gives a modest gain here.** In boot B the GPU went to ~51 W and FP16/BF16
   were ~5–8% above the normal 50 W boot. GEMM runs are only seconds long; sustained loads
   may differ.
-- **FP32 3.05 → ~3.8 came from the driver upgrade (595 → 615), not from the VBIOS.** The
-  normal 50 W boot on 615 gives the same FP32.
-- On the normal boot, the unlock survives the GPU going into runtime D3 and waking up.
+- **FP32 does not change** (3.75 locked, ~3.8 in every configuration). The unlock affects
+  FP16/BF16 tensor throughput.
+- In these tests the unlock survived the GPU going into runtime D3 and waking up, but see
+  [Known issue](#known-issue): it does not always.
 
 ## Known issue
 
-In boot A, FP16/BF16 fell to ~15.4 TFLOPS after the first run. The slow runs had a
-*higher* clock (1927 MHz) and *lower* power (≤31 W) than the fast runs in boot B
-(~1450 MHz, ~51 W), with 55–59 °C. More clock but less power and less work per clock
-does not look like throttling and is consistent with the unlock being partly lost, but the
-selector registers were not read at the time, so this is not confirmed.
+In boot A, FP16/BF16 fell to ~15.4 TFLOPS after the first run — about the locked value
+(14.48 / 14.33), so the unlock was most likely fully lost. The slow runs had a *higher*
+clock (1927 MHz) and *lower* power (≤31 W) than the fast runs in boot B (~1450 MHz, ~51 W),
+with 55–59 °C, which does not look like throttling. The selector registers were not read
+at the time.
+
+A compatibility report on an RTX 3050 Ti Laptop (`10de:25a0`, GA107) in
+[Zagitta/gpu-unlock#246](https://github.com/Zagitta/gpu-unlock/issues/246) gives a likely cause:
+with the default fine-grained runtime D3, the driver power-gates the dGPU and the firmware
+re-locks the selectors on driver re-init. Their fix is disabling runtime D3 with
+`nvidia.NVreg_DynamicPowerManagement=0x00` on the kernel command line. On this laptop the
+re-lock is intermittent (several D3 cycles kept the unlock), and that workaround has not
+been tested here yet. It keeps the dGPU powered at idle, which costs battery.
 
 Boot A ran the first module build; while it was running, the loader rebuilt the modules in
 the background (15:23–15:30) and made a new boot entry the default. Boot B ran that second
