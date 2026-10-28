@@ -14,11 +14,10 @@ All benchmarks below were taken with it loaded; the override without it was not 
 NVIDIA open kernel modules. The card's flash chip is never written. Selecting the
 normal GRUB entry boots with the stock VBIOS.
 
-> **Status: experimental, working.** Override (60 W default / 75 W ceiling) + `gpu-unlock` +
-> runtime D3 disabled: sustained FP16 **22.8 TFLOPS** vs **14.5** locked (+57%). The unlock
-> stays applied through long idle periods. Under sustained FP16 the GPU is mostly
-> **temperature-limited** (87 °C target); gpu-burn is held at ~47 W by core-rail limits that
-> the board power setting does not change.
+> **Status: experimental, working.** Override (60 W default / 75 W ceiling / 55 A NVVDD current)
+> + `gpu-unlock` + runtime D3 disabled: sustained FP16 **22.9 TFLOPS** vs **14.5** locked (+58%),
+> gpu-burn FP32 +12% and TF32 +7% over the 45 A build. The unlock stays applied through long
+> idle periods. Every sustained load is now **temperature-limited** (87 °C target).
 
 ## Hardware
 
@@ -33,7 +32,7 @@ normal GRUB entry boots with the stock VBIOS.
 |---|---|---|
 | Board power ceiling | 50W | **75W** |
 | Boot default board power | 35W | **60W** |
-| NVVDD output current limit | 45A | 45A (unchanged; a 55A build is being tested) |
+| NVVDD output current limit | 45A | **55A** (`nvvdd_output_ocp_max_ma` and `_rated_ma`) |
 | Runtime D3 | fine-grained | **off** (`nvidia.NVreg_DynamicPowerManagement=0x00`) |
 
 `nvidia-smi` reports default 60 W / max 75 W; the kernel log shows
@@ -77,18 +76,32 @@ sustained results for real workloads. No sustained run on the stock VBIOS yet.
 
 ### Sustained load (`stress_max.sh`, 5 min per stage)
 
-| | 50 W default + powerd | 50 W default, powerd stopped | **60 W default + powerd** |
-|---|---|---|---|
-| **FP16 GEMM (unlock), TFLOPS** | 22.20 | 21.70 | **22.82** (22.61–23.22) |
-| FP16 power avg / peak | 52.2 / 57.4 W | 49.6 / 50.2 W | 55.4 / 57.7 W |
-| FP16 clock avg | 1414 MHz | 1388 MHz | 1452 MHz |
-| FP16 limited by | temperature (87 °C) | power (50 W) | temperature ~2/3, power ~1/3 |
-| gpu-burn TF32, TFLOPS | 15.65 | 15.04 | 15.62 |
-| gpu-burn FP32, TFLOPS | 3.86 | 3.87 | 3.88 |
-| gpu-burn power avg | ~47–48 W | ~46–47 W | ~47–48 W |
+All with the 75 W ceiling; NVVDD current limit 45 A unless noted.
 
-Raw summaries are in [`results/`](results/). FP32 never changes; the unlock only affects
-FP16/BF16/TF32 tensor math.
+| | 50 W default + powerd | 50 W default, powerd stopped | 60 W default + powerd | **60 W + 55 A + powerd** |
+|---|---|---|---|---|
+| **FP16 GEMM (unlock), TFLOPS** | 22.20 | 21.70 | 22.82 (22.61–23.22) | **22.93** (22.52–24.67) |
+| FP16 steady state (last 3 windows) | 22.0–22.3 | 21.6 | 22.8–23.2 | 22.5 |
+| FP16 power avg / peak | 52.2 / 57.4 W | 49.6 / 50.2 W | 55.4 / 57.7 W | 55.8 / 73.1 W |
+| FP16 clock avg | 1414 MHz | 1388 MHz | 1452 MHz | 1456 MHz |
+| FP16 limited by | temperature (87 °C) | power (50 W) | temperature ~2/3, power ~1/3 | temperature 95% |
+| **gpu-burn TF32, TFLOPS** | 15.65 | 15.04 | 15.62 | **16.76** |
+| TF32 power avg / peak | 48.2 / 56.1 W | 46.4 / 50.1 W | 48.1 / 54.0 W | 53.5 / 63.3 W |
+| **gpu-burn FP32, TFLOPS** | 3.86 | 3.87 | 3.88 | **4.36** |
+| FP32 power avg / peak | 46.6 / 57.0 W | 46.8 / 50.0 W | 46.8 / 50.5 W | 51.0 / 64.7 W |
+
+What the 55 A step shows:
+
+- **The NVVDD current limit (row 13) was the ~47 W ceiling on gpu-burn.** At 55 A, FP32 is
+  +12% and TF32 +7%, and board power peaks at 63–73 W for the first time.
+- **FP16 does not gain.** It starts faster while the card is cold (24.7 TFLOPS in the first
+  30 s), then settles at ~22.5 once the GPU holds 87 °C — about 2% below the 45 A build's
+  22.8–23.2 at that point. Extra current becomes heat; the 5-min average is the same (22.9).
+- No driver errors (`Xid`) in any run. The core VRM now delivers up to ~73 W; its temperature
+  is not observable.
+
+Raw summaries are in [`results/`](results/). FP32 is unchanged by the unlock; it only gains
+here from the higher current limit.
 
 ## What still limits the card
 
@@ -103,10 +116,11 @@ differ from a 60 W GA107 laptop VBIOS (Acer, 94.07.3B.80.0B):
 | 17 | NVVDD, type 5 | 12.5 | 21.5 | no |
 
 Also different: NVVDD REL voltage ceiling 900 mV here vs 1081.25 mV (read-only in the editor).
-gpu-burn stays at ~47 W with `power-cap` regardless of the board limit, so one of the NVVDD
-rows (13, 16 or 17) is the likely limiter there; which one is not yet known. Raising the
-NVVDD current limit loads the laptop's core VRM beyond what this board shipped with; there is
-no VRM temperature readout.
+Row 13 is confirmed as the gpu-burn limiter: raising it from 45 A to 55 A moved gpu-burn from
+~47 W to 51–54 W average and 63–65 W peaks (see Results). Rows 16 and 17 were left unchanged.
+Raising the NVVDD current limit loads the laptop's core VRM beyond what this board shipped
+with; there is no VRM temperature readout. With the current limit raised, cooling (87 °C) is
+the limit for every sustained load.
 
 ## Setup
 
@@ -131,8 +145,11 @@ no VRM temperature readout.
    ```bash
    cd third_party/nvidia-vbios-vix-editor
    python3 ./nvbios edit card_full.rom ../../card.rom \
-     --set power_max_w=75 --set power_default_w=60
+     --set power_max_w=75 --set power_default_w=60 \
+     --set nvvdd_output_ocp_max_ma=55000 --set nvvdd_output_ocp_rated_ma=55000
    ```
+   The last two raise the core-rail current limit (45 A stock). Leave them out to keep the
+   stock current limit; see [What still limits the card](#what-still-limits-the-card).
 
 3. **Export the loader payload** (Ampere GSP accepts at most 512 KiB from the legacy image;
    this one sends 494080 bytes):
