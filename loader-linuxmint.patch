@@ -1,0 +1,13 @@
+diff --git a/src/nvidia_vbios/lifecycle/platform.py b/src/nvidia_vbios/lifecycle/platform.py
+index e8b28f7..475be02 100644
+--- a/src/nvidia_vbios/lifecycle/platform.py
++++ b/src/nvidia_vbios/lifecycle/platform.py
+@@ -29,7 +29,7 @@ DEBIAN_PLATFORM = PlatformSpec("debian", "debian", "deb", "apt",
+ ARCH_PLATFORM = PlatformSpec("arch", "arch", "pacman", "pacman", ("/usr/lib", "/usr/lib32"))
+ _SUPPORTED = {"fedora": FEDORA_PLATFORM,
+               **{name: replace(RHEL_PLATFORM, id=name) for name in ("rhel", "rocky", "almalinux", "centos")},
+-              **{name: replace(DEBIAN_PLATFORM, id=name) for name in ("debian", "ubuntu")},
++              **{name: replace(DEBIAN_PLATFORM, id=name) for name in ("debian", "ubuntu", "linuxmint")},
+               **{name: replace(ARCH_PLATFORM, id=name) for name in ("arch", "cachyos", "endeavouros")}}
+ 
+ 

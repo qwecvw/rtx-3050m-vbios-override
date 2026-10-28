@@ -1,0 +1,6 @@
+*.rom
+*.bin
+*.bin.json
+vbios-profile/
+open-gpu-kernel-modules/
+*.log
