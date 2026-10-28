@@ -1,0 +1,12 @@
+burn_fp32: power avg 46.8 max 50.0 W | clock avg 1382 min 210 MHz | temp max 85 C | throttle {'power-cap': 305, 'none': 2, 'idle': 22}
+burn_tc: power avg 46.4 max 50.1 W | clock avg 1175 min 210 MHz | temp max 85 C | throttle {'power-cap': 301, 'none': 2, 'idle': 27}
+torch_fp16: power avg 49.6 max 50.2 W | clock avg 1388 min 1057 MHz | temp max 85 C | throttle {'none': 2, 'power-cap': 299}
+torch FP16 21.15
+torch FP16 22.06
+torch FP16 21.79
+torch FP16 21.88
+torch FP16 21.81
+torch FP16 21.76
+torch FP16 21.65
+torch FP16 21.61
+torch FP16 21.61

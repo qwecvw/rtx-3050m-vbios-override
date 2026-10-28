@@ -1,6 +1,6 @@
-# VBIOS 75W Override — RTX 3050 Laptop GPU (GA107)
+# VBIOS Power Override — RTX 3050 Laptop GPU (GA107)
 
-Runtime VBIOS power limit override using two tools by **panchovix**:
+Runtime VBIOS power limit override for an Optimus laptop, using two tools by **panchovix**:
 [nvidia-vbios-vix-editor](https://github.com/Panchovix/nvidia-vbios-vix-editor) and
 [nvidia-linux-vbios-vix-loader](https://github.com/Panchovix/nvidia-linux-vbios-vix-loader).
 Snapshots of both are kept in [`third_party/`](third_party/README.md) with their licenses
@@ -14,83 +14,97 @@ All benchmarks below were taken with it loaded; the override without it was not 
 NVIDIA open kernel modules. The card's flash chip is never written. Selecting the
 normal GRUB entry boots with the stock VBIOS.
 
-> **Status: experimental, working.** With the override and `gpu-unlock` together, FP16/BF16
-> are ~5–8% above the normal 50 W boot and the GPU draws ~51 W. In one earlier boot FP16/BF16
-> dropped to ~15.4 TFLOPS; this did not reproduce in later tests — see [Known issue](#known-issue).
+> **Status: experimental, working.** Override (60 W default / 75 W ceiling) + `gpu-unlock` +
+> runtime D3 disabled: sustained FP16 **22.8 TFLOPS** vs **14.5** locked (+57%). The unlock
+> stays applied through long idle periods. Under sustained FP16 the GPU is mostly
+> **temperature-limited** (87 °C target); gpu-burn is held at ~47 W by core-rail limits that
+> the board power setting does not change.
 
 ## Hardware
 
 - ASUS Vivobook M6500QC, Ryzen 5000H, 120W charger
 - RTX 3050 Laptop GPU 4GB (GA107, `10de:25a2`, rev a1), VBIOS 94.07.5B.00.97
-- AMD iGPU drives the panel (Optimus), runtime D3 enabled (fine-grained)
-- Linux Mint 21.1, kernel 6.8.0-138-generic, NVIDIA 615.71.09
+- AMD iGPU drives the panel (Optimus)
+- Linux Mint 21.1, kernel 6.8.0-138-generic, NVIDIA 615.71.09 (open modules), `nvidia-powerd` running
 
-## Configuration
+## Configuration in use
 
-| Parameter | Stock | Modified |
+| Parameter | Stock | In use |
 |---|---|---|
 | Board power ceiling | 50W | **75W** |
-| Boot default power | 35W | **50W** |
-| NVVDD output OCP | 45A | 45A (unchanged) |
+| Boot default board power | 35W | **60W** |
+| NVVDD output current limit | 45A | 45A (unchanged; a 55A build is being tested) |
+| Runtime D3 | fine-grained | **off** (`nvidia.NVreg_DynamicPowerManagement=0x00`) |
 
-After boot with the override, `nvidia-smi` reports `9W / 75W`, default 50 W, and the
-kernel log shows `NVRM: vbios_override: ... 494080 bytes from offset 0x9200 staged for GSP`.
-The platform (Dynamic Boost) may lower the running limit; 65 W was observed at one point.
+`nvidia-smi` reports default 60 W / max 75 W; the kernel log shows
+`NVRM: vbios_override: ... 494080 bytes from offset 0x9200 staged for GSP`.
 
-## GEMM measurements (4096x4096, 100 iterations, PyTorch 2.0.1+cu117)
+**On a laptop the default value is what matters.** The running limit is the boot default
+plus what Dynamic Boost (`nvidia-powerd`) adds; the ceiling only caps it. With `nvidia-powerd`
+stopped the GPU sat at exactly the default (50.0 W). With it running the GPU peaked at ~57 W.
+Keep `nvidia-powerd` running.
 
-All on driver 615.71.09 with `gpu-unlock` loaded.
+## Runtime D3 re-locks the unlock
 
-| Boot entry | Run | FP16 | BF16 | FP32 |
+With the default fine-grained runtime D3 the driver power-gates the idle dGPU; on wake GSP-RM
+re-initialises and re-locks FEAT_OVR_PLM (`0xffffff8f`), rewriting SS0/SS1. The `gpu_unlock`
+module still logs `unlocked`. Seen here once: FP16 fell from ~23.7 to ~15.4 TFLOPS mid-session
+(locked is 14.48). Root cause reported in
+[Zagitta/gpu-unlock#246](https://github.com/Zagitta/gpu-unlock/issues/246) (RTX 3050 Ti Laptop).
+
+Fix: `nvidia.NVreg_DynamicPowerManagement=0x00` **on the kernel command line** (GRUB). A
+`modprobe.d` option is not applied to the initramfs-loaded nvidia module. Verified here:
+
+- after the driver loads, `check_unlock.sh` reads `PLM=0xffffffff SS0=0x88888888 SS1=0x8`;
+- 3 cycles of 10 min idle, GEMM after each: FP16 23.8–25.0, BF16 25.7–26.4 TFLOPS every time;
+- cost: the dGPU idles at 6.4–7.0 W (average 6.65 W) instead of sleeping.
+
+A full cold power cycle does **not** help; D3 is what decides whether the unlock sticks.
+
+## Results
+
+### Short GEMM (4096², 100 iterations, seconds per run)
+
+| Configuration | FP16 | BF16 | FP32 |
+|---|---|---|---|
+| Locked (stock, driver 595) | 14.48 | 14.33 | 3.75 |
+| Unlock, 50 W boot | 22.9–23.4 | 23.4–24.1 | 3.74–3.78 |
+| Unlock + 75 W ceiling / 50 W default, D3 off | 23.8–25.0 | 25.5–26.4 | 3.79–3.88 |
+
+Short runs do not heat the card; see the sustained results for real workloads.
+
+### Sustained load (`stress_max.sh`, 5 min per stage)
+
+| | 50 W default + powerd | 50 W default, powerd stopped | **60 W default + powerd** |
+|---|---|---|---|
+| **FP16 GEMM (unlock), TFLOPS** | 22.20 | 21.70 | **22.82** (22.61–23.22) |
+| FP16 power avg / peak | 52.2 / 57.4 W | 49.6 / 50.2 W | 55.4 / 57.7 W |
+| FP16 clock avg | 1414 MHz | 1388 MHz | 1452 MHz |
+| FP16 limited by | temperature (87 °C) | power (50 W) | temperature ~2/3, power ~1/3 |
+| gpu-burn TF32, TFLOPS | 15.65 | 15.04 | 15.62 |
+| gpu-burn FP32, TFLOPS | 3.86 | 3.87 | 3.88 |
+| gpu-burn power avg | ~47–48 W | ~46–47 W | ~47–48 W |
+
+Raw summaries are in [`results/`](results/). FP32 never changes; the unlock only affects
+FP16/BF16/TF32 tensor math.
+
+## What still limits the card
+
+The 3x power policy table has 20 rows; the override changes only the board TGP row. Rows that
+differ from a 60 W GA107 laptop VBIOS (Acer, 94.07.3B.80.0B):
+
+| Row | Channel | This laptop | Acer 60 W | Editable in vix-editor |
 |---|---|---|---|---|
-| Normal (50W) | 1–3, back to back | 22.94–23.09 | 23.43–24.11 | 3.74–3.78 |
-| Normal (50W) | after ~6.5 min GPU runtime-suspended | 22.93–23.39 | 23.43–23.80 | 3.75–3.77 |
-| VBIOS override (75W), boot A | first run after boot | 23.69 | 25.89 | 3.85 |
-| VBIOS override (75W), boot A | later runs, same boot | 15.26–15.47 | 15.41–15.44 | 3.80–3.89 |
-| VBIOS override (75W), boot B | 3 runs right after boot | 24.14–25.22 | 25.37–26.09 | 3.77–3.85 |
-| VBIOS override (75W), boot B | after GPU runtime-suspended | 24.09–24.55 | 25.24–25.97 | 3.77–3.86 |
-| VBIOS override (75W), boot B | right after a loader reconcile run | 24.07–24.95 | 25.19–26.01 | 3.77–3.81 |
+| 2 (TGP) | total board power | 35 / 50 W | 60 / 75 W | yes (`power_default_w`, `power_max_w`) |
+| 13 | NVVDD output current | 45 A | 67.5 A | yes (`nvvdd_output_ocp_*`, experimental) |
+| 16 | NVVDD, type 5 | 18.8 | 28.1 | no |
+| 17 | NVVDD, type 5 | 12.5 | 21.5 | no |
 
-In boot B the GPU drew 51–52 W at ~1440–1470 MHz during these runs, above the stock 50 W ceiling.
-
-Locked reference (stock, no unlock, driver 595, same script): FP16 14.48, BF16 14.33, FP32 3.75.
-
-What these numbers do and do not show:
-
-- **The 75 W limit gives a modest gain here.** In boot B the GPU went to ~51 W and FP16/BF16
-  were ~5–8% above the normal 50 W boot. GEMM runs are only seconds long; sustained loads
-  may differ.
-- **FP32 does not change** (3.75 locked, ~3.8 in every configuration). The unlock affects
-  FP16/BF16 tensor throughput.
-- In these tests the unlock survived the GPU going into runtime D3 and waking up, but see
-  [Known issue](#known-issue): it does not always.
-
-## Known issue
-
-In boot A, FP16/BF16 fell to ~15.4 TFLOPS after the first run — about the locked value
-(14.48 / 14.33), so the unlock was most likely fully lost. The slow runs had a *higher*
-clock (1927 MHz) and *lower* power (≤31 W) than the fast runs in boot B (~1450 MHz, ~51 W),
-with 55–59 °C, which does not look like throttling. The selector registers were not read
-at the time.
-
-A compatibility report on an RTX 3050 Ti Laptop (`10de:25a0`, GA107) in
-[Zagitta/gpu-unlock#246](https://github.com/Zagitta/gpu-unlock/issues/246) gives a likely cause:
-with the default fine-grained runtime D3, the driver power-gates the dGPU and GSP-RM
-re-initialises on idle wake, re-locking FEAT_OVR_PLM (`0xffffff8f`) and rewriting SS0/SS1.
-The module still logs `unlocked`. Their fix is disabling runtime D3 with
-`nvidia.NVreg_DynamicPowerManagement=0x00` **on the kernel command line**; a `modprobe.d`
-option was not honoured for the initramfs-loaded nvidia module. They also report that a full
-cold power cycle did not preserve the unlock. On this laptop the
-re-lock is intermittent (several D3 cycles kept the unlock), and that workaround has not
-been tested here yet. It keeps the dGPU powered at idle, which costs battery.
-
-Boot A ran the first module build; while it was running, the loader rebuilt the modules in
-the background (15:23–15:30) and made a new boot entry the default. Boot B ran that second
-build. In boot B, neither back-to-back runs, runtime D3, nor a loader reconcile run
-reproduced the drop.
-
-If it happens again, run `sudo bash check_unlock.sh` right after the slow run. It reads
-SS0/SS1 (read-only), the kernel log and the loader's runs for the current boot.
+Also different: NVVDD REL voltage ceiling 900 mV here vs 1081.25 mV (read-only in the editor).
+gpu-burn stays at ~47 W with `power-cap` regardless of the board limit, so one of the NVVDD
+rows (13, 16 or 17) is the likely limiter there; which one is not yet known. Raising the
+NVVDD current limit loads the laptop's core VRM beyond what this board shipped with; there is
+no VRM temperature readout.
 
 ## Setup
 
@@ -100,6 +114,8 @@ SS0/SS1 (read-only), the kernel log and the loader's runs for the current boot.
 - Python 3.11+ for the loader (deadsnakes PPA on Ubuntu 22.04 / Mint 21)
 - Kernel headers for the running kernel
 - `GRUB_DEFAULT=saved` in `/etc/default/grub`, then `sudo update-grub`
+- For laptops: `nvidia.NVreg_DynamicPowerManagement=0x00` in `GRUB_CMDLINE_LINUX_DEFAULT`
+  **before** enrolling the loader (the override entry copies the normal entry's options)
 
 ### Steps
 
@@ -112,28 +128,50 @@ SS0/SS1 (read-only), the kernel log and the loader's runs for the current boot.
 2. **Edit power limits**:
    ```bash
    cd third_party/nvidia-vbios-vix-editor
-   python3 ./nvbios edit card_full.rom ../../card_75w.rom \
-     --set power_max_w=75 --set power_default_w=50
+   python3 ./nvbios edit card_full.rom ../../card.rom \
+     --set power_max_w=75 --set power_default_w=60
    ```
 
 3. **Export the loader payload** (Ampere GSP accepts at most 512 KiB from the legacy image;
    this one sends 494080 bytes):
    ```bash
-   python3 ./nvbios normalize ../../card_75w.rom ../../card_75w_payload.bin \
+   python3 ./nvbios normalize ../../card.rom ../../card_payload.bin \
      --representation ampere-relocated-v1
    ```
 
-4. **Clone the driver source** for the exact installed version, into `vbios-override/`:
+4. **Clone the driver source** for the exact installed version:
    ```bash
    git clone --depth 1 --branch 615.71.09 \
      https://github.com/NVIDIA/open-gpu-kernel-modules
    ```
 
-5. **Install the loader**: `sudo -E bash setup_vbios_loader.sh`, which runs
-   `devices`, `prepare --userspace deb --initramfs initramfs-tools --boot-backend grub`,
-   `install`, `enroll`, `reconcile` and `enable`. Building the modules takes several minutes.
+5. **Install the loader**: `sudo -E bash setup_vbios_loader.sh` (paths can be overridden with
+   `PAYLOAD=`, `DRIVER_SRC=`, ...). It runs `devices`, `prepare --userspace deb --initramfs
+   initramfs-tools --boot-backend grub`, `install`, `enroll`, `reconcile` and `enable`.
+   Building the modules takes several minutes.
 
 6. **Reboot** — the new GRUB entry with the VBIOS override is the default.
+
+### Changing the payload or kernel options later
+
+The loader keeps a fingerprint of the normal GRUB entry and refuses to re-enroll while its
+triggers are on. Sequence that worked:
+
+```bash
+sudo nvbios system disable          # may report a blocked default restore; triggers still go off
+systemctl is-enabled nvidia-vbios-reconcile.timer   # must say disabled
+sudo python3.11 -I ./nvbios system prepare --device 0 new_payload.bin ... --output new-profile
+sudo nvbios system enroll --profile new-profile/profile.json
+# reconcile expects the last ready override entry to be the GRUB default:
+L=$(sudo python3.11 -I -c "import json;print(json.load(open('/var/lib/nvidia-vbios/lifecycle/fleet.json'))['last_ready']['entry'])")
+sudo grub-editenv /boot/grub/grubenv set saved_entry=$L
+sudo nvbios system reconcile --kernel "$(uname -r)"
+sudo nvbios system enable --kernel "$(uname -r)"
+```
+
+To add a kernel option, change `/etc/default/grub` and regenerate GRUB the way the loader does
+(`sudo env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C LC_ALL=C update-grub`)
+between `disable` and `enroll`.
 
 ### Linux Mint notes
 
@@ -141,19 +179,22 @@ SS0/SS1 (read-only), the kernel log and the loader's runs for the current boot.
   for a fresh upstream clone apply `loader-linuxmint.patch`.
 - The loader refuses symlinks in `/etc/modprobe.d/`. On Mint,
   `blacklist-oss.conf` is a symlink; replace it with a regular copy of its target.
-- If `update-grub` runs after `enroll`, re-run `enroll` (it snapshots the normal entry).
+- Something on Mint regenerates `grub.cfg` with a different menu title around reboot; the loader
+  then rebuilds once in the background (~8 min of CPU) and moves the default to a new,
+  equivalent override entry. Harmless, but avoid benchmarking during that rebuild.
 
 ### Rollback
 
-Select the normal (non-override) entry in GRUB, or:
-```bash
-sudo /usr/local/bin/nvbios system disable
-```
+Select the normal (non-override) entry in GRUB, or `sudo nvbios system disable`.
 
 ## Files
 
 - `third_party/` — vendored editor and loader (author: panchovix), see its README
 - `loader-linuxmint.patch` — the one-line Linux Mint fix for the loader
-- `setup_vbios_loader.sh` — install script used on this laptop
-- `check_unlock.sh` — read-only snapshot of SS0/SS1 and override state
-- `benchmark_75w.json` — first-run GEMM data on the override boot
+- `setup_vbios_loader.sh` — first install script used on this laptop
+- `check_unlock.sh` — read-only PLM/SS0/SS1 snapshot and override state (`sudo`)
+- `bench_gemm.py` — short GEMM benchmark with GPU/loader state
+- `stress_max.sh` — sustained gpu-burn FP32 / TF32 + PyTorch FP16 with power, clock, temperature
+  and throttle-reason logging (`BURN_DIR=/path/to/gpu-burn bash stress_max.sh`)
+- `results/` — sustained-load summaries
+- `benchmark_75w.json` — first-run GEMM data on the first override boot
