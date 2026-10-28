@@ -1,0 +1,9 @@
+{
+  "config": "gpu-unlock + vbios-75w",
+  "driver": "615.71.09",
+  "gemm": {
+    "FP16": 23.69,
+    "BF16": 25.89,
+    "FP32": 3.85
+  }
+}
