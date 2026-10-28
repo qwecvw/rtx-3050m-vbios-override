@@ -10,10 +10,9 @@ and the exact upstream commits.
 NVIDIA open kernel modules. The card's flash chip is never written. Selecting the
 normal GRUB entry boots with the stock VBIOS.
 
-> **Status: experimental, not recommended yet.** The override applies (75 W limit is
-> reported), but together with `gpu-unlock` FP16/BF16 dropped from ~23 to ~15.4 TFLOPS
-> after the first run in that boot. The cause is not yet identified — see
-> [Known issue](#known-issue).
+> **Status: experimental, working.** With the override and `gpu-unlock` together, FP16/BF16
+> are ~5–8% above the normal 50 W boot and the GPU draws ~51 W. In one earlier boot FP16/BF16
+> dropped to ~15.4 TFLOPS; this did not reproduce in later tests — see [Known issue](#known-issue).
 
 ## Hardware
 
@@ -42,28 +41,40 @@ All on driver 615.71.09 with `gpu-unlock` loaded.
 |---|---|---|---|---|
 | Normal (50W) | 1–3, back to back | 22.94–23.09 | 23.43–24.11 | 3.74–3.78 |
 | Normal (50W) | after ~6.5 min GPU runtime-suspended | 22.93–23.39 | 23.43–23.80 | 3.75–3.77 |
-| VBIOS override (75W) | first run after boot | 23.69 | 25.89 | 3.85 |
-| VBIOS override (75W) | later runs, same boot | 15.26–15.47 | 15.41–15.44 | 3.80–3.89 |
+| VBIOS override (75W), boot A | first run after boot | 23.69 | 25.89 | 3.85 |
+| VBIOS override (75W), boot A | later runs, same boot | 15.26–15.47 | 15.41–15.44 | 3.80–3.89 |
+| VBIOS override (75W), boot B | 3 runs right after boot | 24.14–25.22 | 25.37–26.09 | 3.77–3.85 |
+| VBIOS override (75W), boot B | after GPU runtime-suspended | 24.09–24.55 | 25.24–25.97 | 3.77–3.86 |
+| VBIOS override (75W), boot B | right after a loader reconcile run | 24.07–24.95 | 25.19–26.01 | 3.77–3.81 |
+
+In boot B the GPU drew 51–52 W at ~1440–1470 MHz during these runs, above the stock 50 W ceiling.
 
 Earlier reference (driver 595, from the main README): locked FP16 ~7.4, FP32 3.05.
 
 What these numbers do and do not show:
 
-- **The 75 W limit does not matter for this benchmark.** Under GEMM the GPU drew at most
-  ~31 W, below even the stock 50 W limit. A longer, sustained load is needed to measure
-  the effect of the power limit.
+- **The 75 W limit gives a modest gain here.** In boot B the GPU went to ~51 W and FP16/BF16
+  were ~5–8% above the normal 50 W boot. GEMM runs are only seconds long; sustained loads
+  may differ.
 - **FP32 3.05 → ~3.8 came from the driver upgrade (595 → 615), not from the VBIOS.** The
   normal 50 W boot on 615 gives the same FP32.
 - On the normal boot, the unlock survives the GPU going into runtime D3 and waking up.
 
 ## Known issue
 
-On the override boot, FP16/BF16 fell to ~15.4 TFLOPS after the first run, while clocks
-(1927 MHz), temperature (55–59 °C) and power (≤31 W) showed no throttling. `gpu_unlock`
-logged `unlocked` (SS0=0x88888888, SS1=0x8) at boot. Not yet determined whether this is
-caused by the loader itself or by the loader combined with runtime D3. Planned test:
-on the override entry, run GEMM several times right after boot, then again after the GPU
-reports `runtime_status=suspended`.
+In boot A, FP16/BF16 fell to ~15.4 TFLOPS after the first run. The slow runs had a
+*higher* clock (1927 MHz) and *lower* power (≤31 W) than the fast runs in boot B
+(~1450 MHz, ~51 W), with 55–59 °C. More clock but less power and less work per clock
+does not look like throttling and is consistent with the unlock being partly lost, but the
+selector registers were not read at the time, so this is not confirmed.
+
+Boot A ran the first module build; while it was running, the loader rebuilt the modules in
+the background (15:23–15:30) and made a new boot entry the default. Boot B ran that second
+build. In boot B, neither back-to-back runs, runtime D3, nor a loader reconcile run
+reproduced the drop.
+
+If it happens again, run `sudo bash check_unlock.sh` right after the slow run. It reads
+SS0/SS1 (read-only), the kernel log and the loader's runs for the current boot.
 
 ## Setup
 
@@ -128,4 +139,5 @@ sudo /usr/local/bin/nvbios system disable
 - `third_party/` — vendored editor and loader (author: panchovix), see its README
 - `loader-linuxmint.patch` — the one-line Linux Mint fix for the loader
 - `setup_vbios_loader.sh` — install script used on this laptop
+- `check_unlock.sh` — read-only snapshot of SS0/SS1 and override state
 - `benchmark_75w.json` — first-run GEMM data on the override boot
